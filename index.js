@@ -33,9 +33,20 @@ function ensureGoogleKeyFile() {
     return filePath;
   }
 
-  fs.writeFileSync(filePath, envJson, 'utf8');
-  console.log(`✅ Google service account key written to: ${filePath}`);
-  return filePath;
+  try {
+    const parsed = JSON.parse(envJson);
+
+    if (parsed.private_key) {
+      parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+    }
+
+    fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf8');
+    console.log(`✅ Google service account key written to: ${filePath}`);
+    return filePath;
+  } catch (err) {
+    console.error('❌ GOOGLE_SA_JSON 파싱 실패:', err);
+    throw err;
+  }
 }
 
 const GOOGLE_KEYFILE = ensureGoogleKeyFile();
@@ -235,7 +246,7 @@ function calculateAdminUnits(input) {
   return (
     (input.진급처리 || 0) * 1 +
     (input.인증처리 || 0) * 1.5 +
-    (input.팀변경 || 0) * 1
+    (input.행정처리 || 0) * 1
   );
 }
 
@@ -588,10 +599,11 @@ async function registerCommands() {
   if (!guild) return console.log('서버를 찾을 수 없습니다.');
 
   const 소령Command = new SlashCommandBuilder()
-    .setName('소령행정보고').setDescription('소령 행정 보고서 (소령 전용)')
+    .setName('소령행정보고')
+    .setDescription('소령 행정 보고서 (소령 전용)')
     .addIntegerOption(o => o.setName('진급처리').setDescription('진급 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('인증처리').setDescription('인증 처리 : n건').setRequired(true))
-    .addIntegerOption(o => o.setName('팀변경').setDescription('팀 변경 / 행정 요청 처리 : n건').setRequired(true))
+    .addIntegerOption(o => o.setName('행정처리').setDescription('행정 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('보직모집').setDescription('보직가입 요청 / 모집시험 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('훈련개최').setDescription('훈련 개최 : n건').setRequired(true));
 
@@ -602,10 +614,11 @@ async function registerCommands() {
   }
 
   const 중령Command = new SlashCommandBuilder()
-    .setName('중령행정보고').setDescription('중령 행정 보고서 (중령 전용)')
+    .setName('중령행정보고')
+    .setDescription('중령 행정 보고서 (중령 전용)')
     .addIntegerOption(o => o.setName('진급처리').setDescription('진급 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('인증처리').setDescription('인증 처리 : n건').setRequired(true))
-    .addIntegerOption(o => o.setName('팀변경').setDescription('팀 변경 / 행정 요청 처리 : n건').setRequired(true))
+    .addIntegerOption(o => o.setName('행정처리').setDescription('행정 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('보직모집').setDescription('보직가입 요청 / 모집시험 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('훈련개최').setDescription('훈련 개최 : n건').setRequired(true));
 
@@ -832,7 +845,7 @@ client.on('interactionCreate', async interaction => {
     const input = {
       진급처리: interaction.options.getInteger('진급처리'),
       인증처리: interaction.options.getInteger('인증처리'),
-      팀변경: interaction.options.getInteger('팀변경'),
+      행정처리: interaction.options.getInteger('행정처리'),
       보직모집: interaction.options.getInteger('보직모집'),
       훈련개최: interaction.options.getInteger('훈련개최')
     };
@@ -842,7 +855,7 @@ client.on('interactionCreate', async interaction => {
 
     replyText += `**진급 처리**: ${input.진급처리}건\n`;
     replyText += `**인증 처리**: ${input.인증처리}건\n`;
-    replyText += `**팀 변경 / 행정 요청 처리**: ${input.팀변경}건\n`;
+    replyText += `**행정 처리**: ${input.행정처리}건\n`;
     replyText += `**보직가입 요청 / 모집시험**: ${input.보직모집}건\n`;
     replyText += `**훈련 개최**: ${input.훈련개최}건\n`;
     replyText += `**총 행정 건수**: ${adminCount}건\n`;
@@ -889,7 +902,7 @@ client.on('interactionCreate', async interaction => {
         displayName,
         input.진급처리,
         input.인증처리,
-        input.팀변경,
+        input.행정처리,
         adminCount,
         input.보직모집,
         input.훈련개최
@@ -1213,14 +1226,14 @@ client.login(TOKEN);
 2) 행정 업무 입력 항목
 - 진급처리
 - 인증처리
-- 팀변경
+- 행정처리
 - 보직모집
 - 훈련개최
 
 3) 행정 건수 계산
 - 진급처리 = 1
 - 인증처리 = 1.5
-- 팀변경 = 1
+- 행정처리 = 1
 
 4) 추가점수 계산
 - 보직모집 = 2
@@ -1244,7 +1257,7 @@ A 날짜
 B 닉네임
 C 진급처리
 D 인증처리
-E 팀변경
+E 행정처리
 F 총 행정 건수
 G 보직모집
 H 훈련개최
