@@ -86,12 +86,10 @@ const MANAGER_ROLE_IDS = [
   BOT_MANAGER_ROLE_ID
 ];
 
-const EXCLUDED_ROLE_IDS = [
-  BOT_MANAGER_ROLE_ID,
-  HR_ADMIN_ROLE_ID
-];
+// 점수 조회에는 소령/중령 역할 보유자를 전부 포함
+const EXCLUDED_ROLE_IDS = [];
 
-// ✅ 강등 대상에서는 HR_ADMIN_ROLE_ID 제외하지 않음
+// 강등대상에서는 인사행정단도 포함되도록 HR_ADMIN_ROLE_ID 제외 제거
 const DEMOTION_EXCLUDED_ROLE_IDS = [
   BOT_MANAGER_ROLE_ID
 ];
@@ -270,6 +268,7 @@ function getAdminPointsByPercentile(pct) {
   return 20;
 }
 
+// 점수 조회에는 소령/중령 역할 보유자를 전부 포함
 async function getEligibleMemberIdsByRank(guild, rankName) {
   const members = await guild.members.fetch();
   const requiredRole = rankName === '소령' ? MAJOR_ROLE_ID : LTCOL_ROLE_ID;
@@ -278,10 +277,6 @@ async function getEligibleMemberIdsByRank(guild, rankName) {
   for (const [, m] of members) {
     if (m.user?.bot) continue;
     if (!m.roles.cache.has(requiredRole)) continue;
-
-    const excluded = m.roles.cache.some(r => EXCLUDED_ROLE_IDS.includes(r.id));
-    if (excluded) continue;
-
     ids.push(m.id);
   }
   return ids;
@@ -467,7 +462,7 @@ function createDemotionEmbed(list, page, pageSize, totalPages) {
   return new EmbedBuilder()
     .setTitle('강등 대상 (주간 총합 120점 미만)')
     .setDescription(lines)
-    .setFooter({ text: `페이지 ${page + 1}/${totalPages} · 가입 7일 미만/제외 역할 보유자는 제외됨` });
+    .setFooter({ text: `페이지 ${page + 1}/${totalPages} · 가입 7일 미만 유저는 제외됨` });
 }
 
 function buildDemotionComponents(page, totalPages) {
@@ -1030,11 +1025,7 @@ client.on('interactionCreate', async interaction => {
       const rankName = getRankNameForMember(m);
       if (!rankName) continue;
 
-      // ✅ 가입 7일 미만은 그대로 제외
       if (daysSinceJoined(m) < 7) continue;
-
-      // ✅ BOT_MANAGER_ROLE_ID만 강등 대상에서 제외
-      // ✅ HR_ADMIN_ROLE_ID 보유자는 점수 미달 시 포함
       if (hasAnyRole(m, DEMOTION_EXCLUDED_ROLE_IDS)) continue;
 
       eligible.push({ member: m, rankName });
@@ -1266,21 +1257,26 @@ F 총 행정 건수
 G 보직모집
 H 훈련개최
 
-8) 강등 대상
-- 현재 주간 총합 120점 미만
-- HR_ADMIN_ROLE_ID(1486229581584142437) 보유자도 포함
-- 단, 서버 가입 7일 미만 유저는 제외
-- BOT_MANAGER_ROLE_ID(1486229581592793209) 보유자는 제외
+8) 점수 조회 포함 기준
+- 소령오늘점수 / 소령어제점수 / 소령지난주점수 / 소령주간점수:
+  소령 역할 보유자 전부 포함
+- 중령오늘점수 / 중령어제점수 / 중령지난주점수 / 중령주간점수:
+  중령 역할 보유자 전부 포함
 
-9) 증거사진
+9) 강등 대상 포함 기준
+- 인사행정단 역할 보유자도 포함
+- 단, 가입 7일 미만 유저는 계속 제외
+- BOT_MANAGER_ROLE_ID 보유자는 제외 유지
+
+10) 증거사진
 - 최대 10장 첨부 가능
 - 첨부파일만 전송
 - embed에 URL 재출력 안 함
 
-10) 시트 탭 이름
+11) 시트 탭 이름
 - 반드시 '소령', '중령'
 
-11) 스프레드시트 공유
+12) 스프레드시트 공유
 - 서비스 계정 이메일
   service-account-579@fulfillment-management-bot2.iam.gserviceaccount.com
   에 편집 권한으로 공유해야 정상 작동
