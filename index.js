@@ -91,9 +91,9 @@ const EXCLUDED_ROLE_IDS = [
   HR_ADMIN_ROLE_ID
 ];
 
+// ✅ 강등 대상에서는 HR_ADMIN_ROLE_ID 제외하지 않음
 const DEMOTION_EXCLUDED_ROLE_IDS = [
-  BOT_MANAGER_ROLE_ID,
-  HR_ADMIN_ROLE_ID
+  BOT_MANAGER_ROLE_ID
 ];
 
 const DEMOTION_ALLOWED_ROLE_IDS = [
@@ -1030,7 +1030,11 @@ client.on('interactionCreate', async interaction => {
       const rankName = getRankNameForMember(m);
       if (!rankName) continue;
 
+      // ✅ 가입 7일 미만은 그대로 제외
       if (daysSinceJoined(m) < 7) continue;
+
+      // ✅ BOT_MANAGER_ROLE_ID만 강등 대상에서 제외
+      // ✅ HR_ADMIN_ROLE_ID 보유자는 점수 미달 시 포함
       if (hasAnyRole(m, DEMOTION_EXCLUDED_ROLE_IDS)) continue;
 
       eligible.push({ member: m, rankName });
@@ -1264,6 +1268,9 @@ H 훈련개최
 
 8) 강등 대상
 - 현재 주간 총합 120점 미만
+- HR_ADMIN_ROLE_ID(1486229581584142437) 보유자도 포함
+- 단, 서버 가입 7일 미만 유저는 제외
+- BOT_MANAGER_ROLE_ID(1486229581592793209) 보유자는 제외
 
 9) 증거사진
 - 최대 10장 첨부 가능
