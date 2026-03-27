@@ -811,17 +811,34 @@ client.on('interactionCreate', async interaction => {
   const isMajor = () => hasRole(MAJOR_ROLE_ID);
   const isLtCol = () => hasRole(LTCOL_ROLE_ID);
 
-  // 전체 명령어 관리 역할 제한
-  if (!isManager()) {
-    return interaction.reply({ content: '❌ 지정된 관리 역할만 이 봇 명령어를 사용할 수 있습니다.', ephemeral: true });
+  // /소령행정보고: 소령 역할만 사용 가능
+  if (cmd === '소령행정보고') {
+    if (!isMajor()) {
+      return interaction.reply({
+        content: '❌ 이 명령어는 **소령 역할**(<@&1486229581190004753>)만 사용할 수 있습니다.',
+        ephemeral: true
+      });
+    }
   }
 
-  // 역할 제한
-  if (cmd === '소령행정보고' && !isMajor()) {
-    return interaction.reply({ content: '❌ 이 명령어는 **소령 역할**만 사용할 수 있습니다.', ephemeral: true });
+  // /중령행정보고: 중령 역할만 사용 가능
+  if (cmd === '중령행정보고') {
+    if (!isLtCol()) {
+      return interaction.reply({
+        content: '❌ 이 명령어는 **중령 역할**(<@&1486229581190004754>)만 사용할 수 있습니다.',
+        ephemeral: true
+      });
+    }
   }
-  if (cmd === '중령행정보고' && !isLtCol()) {
-    return interaction.reply({ content: '❌ 이 명령어는 **중령 역할**만 사용할 수 있습니다.', ephemeral: true });
+
+  // 그 외 명령어는 봇 관리자 역할만 사용 가능
+  if (cmd !== '소령행정보고' && cmd !== '중령행정보고') {
+    if (!isManager()) {
+      return interaction.reply({
+        content: '❌ 지정된 관리 역할만 이 봇 명령어를 사용할 수 있습니다.',
+        ephemeral: true
+      });
+    }
   }
 
   // ================== 행정보고 ==================
@@ -1280,4 +1297,9 @@ H 훈련개최
 - 서비스 계정 이메일
   service-account-579@fulfillment-management-bot2.iam.gserviceaccount.com
   에 편집 권한으로 공유해야 정상 작동
+
+13) 명령어 권한 최종
+- /소령행정보고 → 소령 역할(ID: 1486229581190004753)만 사용 가능
+- /중령행정보고 → 중령 역할(ID: 1486229581190004754)만 사용 가능
+- 그 외 모든 명령어 → BOT_MANAGER_ROLE_ID 필요
 */
