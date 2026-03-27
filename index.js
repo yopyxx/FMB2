@@ -444,7 +444,7 @@ function createWeeklyEmbedPaged(rankName, weekStart, weekEnd, fullList, page, pa
 
   return new EmbedBuilder()
     .setTitle(`${rankName} ${titlePrefix}`)
-    .setDescription(`**주간 범위(새벽 2시 기준)**: ${weekStart} ~ ${weekEnd} (7일)\n\n${lines}`)
+    .setDescription(`**주간 범위(02시 기준)**: ${weekStart} 02:00 ~ ${addDays(weekEnd, 1)} 02:00\n\n${lines}`)
     .setFooter({ text: `페이지 ${p + 1}/${totalPages} · 주간=일~토(7일) 합산 / 최소업무 미달일도 추가점수는 반영` });
 }
 
@@ -595,7 +595,7 @@ async function registerCommands() {
 
   const 소령Command = new SlashCommandBuilder()
     .setName('소령행정보고')
-    .setDescription('소령 행정 보고서 (소령 전용)')
+    .setDescription('소령 행정 보고서 (소령 전용 / 02시~익일 02시 기준 하루 1회)')
     .addIntegerOption(o => o.setName('진급처리').setDescription('진급 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('인증처리').setDescription('인증 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('행정처리').setDescription('행정 처리 : n건').setRequired(true))
@@ -610,7 +610,7 @@ async function registerCommands() {
 
   const 중령Command = new SlashCommandBuilder()
     .setName('중령행정보고')
-    .setDescription('중령 행정 보고서 (중령 전용)')
+    .setDescription('중령 행정 보고서 (중령 전용 / 02시~익일 02시 기준 하루 1회)')
     .addIntegerOption(o => o.setName('진급처리').setDescription('진급 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('인증처리').setDescription('인증 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('행정처리').setDescription('행정 처리 : n건').setRequired(true))
@@ -842,120 +842,82 @@ client.on('interactionCreate', async interaction => {
   }
 
   // ================== 행정보고 ==================
-if (cmd === '소령행정보고' || cmd === '중령행정보고') {
-  const is소령 = cmd === '소령행정보고';
-  const date = getReportDate();
+  if (cmd === '소령행정보고' || cmd === '중령행정보고') {
+    const is소령 = cmd === '소령행정보고';
+    const date = getReportDate();
 
-  const mention = `<@${interaction.user.id}>`;
-  const displayName = interaction.member?.displayName || interaction.user.username;
+    const mention = `<@${interaction.user.id}>`;
+    const displayName = interaction.member?.displayName || interaction.user.username;
 
-  let replyText =
-    `✅ **${is소령 ? '소령' : '중령'} 보고 완료!**\n` +
-    `**닉네임**: ${mention}\n` +
-    `**일자**: ${date}\n\n`;
-
-  const input = {
-    진급처리: interaction.options.getInteger('진급처리'),
-    인증처리: interaction.options.getInteger('인증처리'),
-    행정처리: interaction.options.getInteger('행정처리'),
-    보직모집: interaction.options.getInteger('보직모집'),
-    훈련개최: interaction.options.getInteger('훈련개최')
-  };
-
-  const adminCount = calculateAdminUnits(input);
-  const extra = calculateExtraPoints(input);
-
-  replyText += `**진급 처리**: ${input.진급처리}건\n`;
-  replyText += `**인증 처리**: ${input.인증처리}건\n`;
-  replyText += `**행정 처리**: ${input.행정처리}건\n`;
-  replyText += `**보직가입 요청 / 모집시험**: ${input.보직모집}건\n`;
-  replyText += `**훈련 개최**: ${input.훈련개최}건\n`;
-  replyText += `**총 행정 건수**: ${adminCount}건\n`;
-
-  const photoAttachments = [];
-  for (let i = 1; i <= 10; i++) {
-    const att = interaction.options.getAttachment(`증거사진${i}`);
-    if (att) photoAttachments.push(att);
-  }
-
-  if (photoAttachments.length > 0) {
-    replyText += `\n📸 증거 사진 ${photoAttachments.length}장 첨부됨`;
-  } else {
-    replyText += `\n⚠️ 증거 사진이 첨부되지 않았습니다.`;
-  }
-
-  const group = is소령 ? data.소령 : data.중령;
-
-  if (!group.users[interaction.user.id]) {
-    group.users[interaction.user.id] = {
-      nick: displayName,
-      totalAdmin: 0,
-      totalExtra: 0,
-      daily: {}
+    const input = {
+      진급처리: interaction.options.getInteger('진급처리'),
+      인증처리: interaction.options.getInteger('인증처리'),
+      행정처리: interaction.options.getInteger('행정처리'),
+      보직모집: interaction.options.getInteger('보직모집'),
+      훈련개최: interaction.options.getInteger('훈련개최')
     };
-  }
 
-  const u = group.users[interaction.user.id];
-  u.nick = displayName;
+    const adminCount = calculateAdminUnits(input);
+    const extra = calculateExtraPoints(input);
 
-  // ================== 핵심 수정: 하루 1회 제한 ==================
-  if (u.daily[date]) {
-    return interaction.reply({
-      content:
-        `❌ 이미 해당 기준일(${date})에 행정보고를 완료했습니다.\n` +
-        `기준 시간은 **오늘 02:00 ~ 다음날 02:00** 입니다.`,
-      ephemeral: true
-    });
-  }
+    const group = is소령 ? data.소령 : data.중령;
+    if (!group.users[interaction.user.id]) {
+      group.users[interaction.user.id] = {
+        nick: displayName,
+        totalAdmin: 0,
+        totalExtra: 0,
+        daily: {}
+      };
+    }
 
-  // ================== 하루 1회 저장 ==================
-  u.daily[date] = {
-    admin: adminCount,
-    extra
-  };
+    const u = group.users[interaction.user.id];
+    u.nick = displayName;
 
-  u.totalAdmin += adminCount;
-  u.totalExtra += extra;
+    // ✅ 02시~익일 02시 기준 하루 1회 제한
+    if (u.daily[date]) {
+      return interaction.reply({
+        content:
+          `❌ 오늘(${date}, 02:00 ~ 익일 02:00 기준)은 이미 **${is소령 ? '소령' : '중령'} 행정보고**를 완료했습니다.\n` +
+          `기록을 다시 제출해야 하면 관리자 역할이 **/${is소령 ? '소령오늘초기화' : '중령오늘초기화'} 대상:@유저** 명령어로 초기화한 뒤 다시 보고해 주세요.`,
+        ephemeral: true
+      });
+    }
 
-  dayTotalsCache.delete(`${is소령 ? '소령' : '중령'}|${date}`);
-  saveData();
+    let replyText =
+      `✅ **${is소령 ? '소령' : '중령'} 보고 완료!**\n` +
+      `**닉네임**: ${mention}\n` +
+      `**일자**: ${date}\n` +
+      `**기준**: 02:00 ~ 익일 02:00 (하루 1회 제출)\n\n`;
 
-  // ================== 구글 시트 저장 ==================
-  try {
-    const range = is소령 ? '소령!A:H' : '중령!A:H';
+    replyText += `**진급 처리**: ${input.진급처리}건\n`;
+    replyText += `**인증 처리**: ${input.인증처리}건\n`;
+    replyText += `**행정 처리**: ${input.행정처리}건\n`;
+    replyText += `**보직가입 요청 / 모집시험**: ${input.보직모집}건\n`;
+    replyText += `**훈련 개최**: ${input.훈련개최}건\n`;
+    replyText += `**총 행정 건수**: ${adminCount}건\n`;
 
-    await appendRowToSheet(range, [
-      date,
-      displayName,
-      input.진급처리,
-      input.인증처리,
-      input.행정처리,
-      adminCount,
-      input.보직모집,
-      input.훈련개최
-    ]);
-  } catch (e) {
-    console.error('❌ 구글시트 저장 실패:', e);
-    replyText += `\n\n⚠️ 구글 시트 자동 기입에 실패했습니다.`;
-  }
+    const photoAttachments = [];
+    for (let i = 1; i <= 10; i++) {
+      const att = interaction.options.getAttachment(`증거사진${i}`);
+      if (att) photoAttachments.push(att);
+    }
 
-  let files = [];
+    if (photoAttachments.length > 0) {
+      replyText += `\n📸 증거 사진 ${photoAttachments.length}장 첨부됨`;
+    } else {
+      replyText += `\n⚠️ 증거 사진이 첨부되지 않았습니다.`;
+    }
 
-  if (photoAttachments.length > 0) {
-    files = photoAttachments.slice(0, 10).map((att, idx) => ({
-      attachment: att.url,
-      name: `evidence_${idx + 1}_${att.name || `image_${idx + 1}.png`}`
-    }));
-  }
+    // ✅ 하루 1회 제출이므로 누적 += 가 아니라 해당 날짜에 최초 1회 저장
+    u.daily[date] = {
+      admin: adminCount,
+      extra: extra
+    };
 
-  await interaction.reply({
-    content: replyText,
-    files,
-    ephemeral: false
-  });
+    recomputeTotals(group);
 
-  return;
-}
+    dayTotalsCache.delete(`${is소령 ? '소령' : '중령'}|${date}`);
+    saveData();
 
     // ================== 구글 시트 저장 ==================
     try {
@@ -1204,7 +1166,12 @@ if (cmd === '소령행정보고' || cmd === '중령행정보고') {
       paginationSessions.clear();
       saveData();
 
-      return interaction.reply({ content: `✅ 오늘(${date}) 기록 전체 초기화 완료 (${cleared}명)`, ephemeral: false });
+      return interaction.reply({
+        content:
+          `✅ 오늘(${date}) 기록 전체 초기화 완료 (${cleared}명)\n` +
+          `이제 해당 인원들은 ${is소령 ? '/소령행정보고' : '/중령행정보고'}를 다시 사용할 수 있습니다.`,
+        ephemeral: false
+      });
     }
 
     const uid = targetUser.id;
@@ -1220,7 +1187,12 @@ if (cmd === '소령행정보고' || cmd === '중령행정보고') {
     paginationSessions.clear();
     saveData();
 
-    return interaction.reply({ content: `✅ ${targetUser} 님의 오늘(${date}) 기록을 초기화했습니다.`, ephemeral: false });
+    return interaction.reply({
+      content:
+        `✅ ${targetUser} 님의 오늘(${date}) 기록을 초기화했습니다.\n` +
+        `이제 ${targetUser} 님은 ${is소령 ? '/소령행정보고' : '/중령행정보고'}를 다시 사용할 수 있습니다.`,
+      ephemeral: false
+    });
   }
 
   if (cmd === '행정통계') {
@@ -1253,7 +1225,7 @@ if (cmd === '소령행정보고' || cmd === '중령행정보고') {
     const embed = new EmbedBuilder()
       .setTitle('행정 통계(원자료)')
       .setDescription(
-        `**기준 일자(새벽 2시 기준)**: ${date}\n\n` +
+        `**기준 일자(02시~익일 02시 기준)**: ${date}\n\n` +
         `## 소령\n` +
         `- 등록 인원: ${sMaj.userCount}명\n` +
         `- 누적(원자료): 행정(건수) ${sMaj.totalAdmin} / 추가(점수) ${sMaj.totalExtra}\n` +
@@ -1262,7 +1234,8 @@ if (cmd === '소령행정보고' || cmd === '중령행정보고') {
         `- 등록 인원: ${sLt.userCount}명\n` +
         `- 누적(원자료): 행정(건수) ${sLt.totalAdmin} / 추가(점수) ${sLt.totalExtra}\n` +
         `- 오늘(원자료): 행정(건수) ${sLt.todayAdminUnits} / 추가(점수) ${sLt.todayExtra}\n\n` +
-        `※ 최소업무 미달이어도 추가점수는 점수 합산에 반영됩니다.`
+        `※ 최소업무 미달이어도 추가점수는 점수 합산에 반영됩니다.\n` +
+        `※ 행정보고는 02시~익일 02시 기준 하루 1회만 제출 가능합니다.`
       );
 
     return interaction.reply({ embeds: [embed] });
@@ -1353,4 +1326,9 @@ H 훈련개최
 - /소령행정보고 → 소령 역할(ID: 1486229581190004753)만 사용 가능
 - /중령행정보고 → 중령 역할(ID: 1486229581190004754)만 사용 가능
 - 그 외 모든 명령어 → BOT_MANAGER_ROLE_ID 필요
+
+14) 1일 1회 제한
+- /소령행정보고, /중령행정보고는 02:00 ~ 익일 02:00 기준 하루 1회만 가능
+- 해당 날짜 기록이 이미 존재하면 재사용 불가
+- /소령오늘초기화, /중령오늘초기화로 해당 날짜 기록 삭제 시 다시 보고 가능
 */
