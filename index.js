@@ -842,69 +842,120 @@ client.on('interactionCreate', async interaction => {
   }
 
   // ================== 행정보고 ==================
-  if (cmd === '소령행정보고' || cmd === '중령행정보고') {
-    const is소령 = cmd === '소령행정보고';
-    const date = getReportDate();
+if (cmd === '소령행정보고' || cmd === '중령행정보고') {
+  const is소령 = cmd === '소령행정보고';
+  const date = getReportDate();
 
-    const mention = `<@${interaction.user.id}>`;
-    const displayName = interaction.member?.displayName || interaction.user.username;
+  const mention = `<@${interaction.user.id}>`;
+  const displayName = interaction.member?.displayName || interaction.user.username;
 
-    let replyText =
-      `✅ **${is소령 ? '소령' : '중령'} 보고 완료!**\n` +
-      `**닉네임**: ${mention}\n` +
-      `**일자**: ${date}\n\n`;
+  let replyText =
+    `✅ **${is소령 ? '소령' : '중령'} 보고 완료!**\n` +
+    `**닉네임**: ${mention}\n` +
+    `**일자**: ${date}\n\n`;
 
-    const input = {
-      진급처리: interaction.options.getInteger('진급처리'),
-      인증처리: interaction.options.getInteger('인증처리'),
-      행정처리: interaction.options.getInteger('행정처리'),
-      보직모집: interaction.options.getInteger('보직모집'),
-      훈련개최: interaction.options.getInteger('훈련개최')
+  const input = {
+    진급처리: interaction.options.getInteger('진급처리'),
+    인증처리: interaction.options.getInteger('인증처리'),
+    행정처리: interaction.options.getInteger('행정처리'),
+    보직모집: interaction.options.getInteger('보직모집'),
+    훈련개최: interaction.options.getInteger('훈련개최')
+  };
+
+  const adminCount = calculateAdminUnits(input);
+  const extra = calculateExtraPoints(input);
+
+  replyText += `**진급 처리**: ${input.진급처리}건\n`;
+  replyText += `**인증 처리**: ${input.인증처리}건\n`;
+  replyText += `**행정 처리**: ${input.행정처리}건\n`;
+  replyText += `**보직가입 요청 / 모집시험**: ${input.보직모집}건\n`;
+  replyText += `**훈련 개최**: ${input.훈련개최}건\n`;
+  replyText += `**총 행정 건수**: ${adminCount}건\n`;
+
+  const photoAttachments = [];
+  for (let i = 1; i <= 10; i++) {
+    const att = interaction.options.getAttachment(`증거사진${i}`);
+    if (att) photoAttachments.push(att);
+  }
+
+  if (photoAttachments.length > 0) {
+    replyText += `\n📸 증거 사진 ${photoAttachments.length}장 첨부됨`;
+  } else {
+    replyText += `\n⚠️ 증거 사진이 첨부되지 않았습니다.`;
+  }
+
+  const group = is소령 ? data.소령 : data.중령;
+
+  if (!group.users[interaction.user.id]) {
+    group.users[interaction.user.id] = {
+      nick: displayName,
+      totalAdmin: 0,
+      totalExtra: 0,
+      daily: {}
     };
+  }
 
-    const adminCount = calculateAdminUnits(input);
-    const extra = calculateExtraPoints(input);
+  const u = group.users[interaction.user.id];
+  u.nick = displayName;
 
-    replyText += `**진급 처리**: ${input.진급처리}건\n`;
-    replyText += `**인증 처리**: ${input.인증처리}건\n`;
-    replyText += `**행정 처리**: ${input.행정처리}건\n`;
-    replyText += `**보직가입 요청 / 모집시험**: ${input.보직모집}건\n`;
-    replyText += `**훈련 개최**: ${input.훈련개최}건\n`;
-    replyText += `**총 행정 건수**: ${adminCount}건\n`;
+  // ================== 핵심 수정: 하루 1회 제한 ==================
+  if (u.daily[date]) {
+    return interaction.reply({
+      content:
+        `❌ 이미 해당 기준일(${date})에 행정보고를 완료했습니다.\n` +
+        `기준 시간은 **오늘 02:00 ~ 다음날 02:00** 입니다.`,
+      ephemeral: true
+    });
+  }
 
-    const photoAttachments = [];
-    for (let i = 1; i <= 10; i++) {
-      const att = interaction.options.getAttachment(`증거사진${i}`);
-      if (att) photoAttachments.push(att);
-    }
+  // ================== 하루 1회 저장 ==================
+  u.daily[date] = {
+    admin: adminCount,
+    extra
+  };
 
-    if (photoAttachments.length > 0) {
-      replyText += `\n📸 증거 사진 ${photoAttachments.length}장 첨부됨`;
-    } else {
-      replyText += `\n⚠️ 증거 사진이 첨부되지 않았습니다.`;
-    }
+  u.totalAdmin += adminCount;
+  u.totalExtra += extra;
 
-    const group = is소령 ? data.소령 : data.중령;
-    if (!group.users[interaction.user.id]) {
-      group.users[interaction.user.id] = {
-        nick: displayName,
-        totalAdmin: 0,
-        totalExtra: 0,
-        daily: {}
-      };
-    }
+  dayTotalsCache.delete(`${is소령 ? '소령' : '중령'}|${date}`);
+  saveData();
 
-    const u = group.users[interaction.user.id];
-    u.nick = displayName;
+  // ================== 구글 시트 저장 ==================
+  try {
+    const range = is소령 ? '소령!A:H' : '중령!A:H';
 
-    if (!u.daily[date]) u.daily[date] = { admin: 0, extra: 0 };
-    u.daily[date].admin += adminCount;
-    u.daily[date].extra += extra;
-    u.totalAdmin += adminCount;
-    u.totalExtra += extra;
+    await appendRowToSheet(range, [
+      date,
+      displayName,
+      input.진급처리,
+      input.인증처리,
+      input.행정처리,
+      adminCount,
+      input.보직모집,
+      input.훈련개최
+    ]);
+  } catch (e) {
+    console.error('❌ 구글시트 저장 실패:', e);
+    replyText += `\n\n⚠️ 구글 시트 자동 기입에 실패했습니다.`;
+  }
 
-    dayTotalsCache.delete(`${is소령 ? '소령' : '중령'}|${date}`);
-    saveData();
+  let files = [];
+
+  if (photoAttachments.length > 0) {
+    files = photoAttachments.slice(0, 10).map((att, idx) => ({
+      attachment: att.url,
+      name: `evidence_${idx + 1}_${att.name || `image_${idx + 1}.png`}`
+    }));
+  }
+
+  await interaction.reply({
+    content: replyText,
+    files,
+    ephemeral: false
+  });
+
+  return;
+}
 
     // ================== 구글 시트 저장 ==================
     try {
