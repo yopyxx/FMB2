@@ -77,25 +77,29 @@ const client = new Client({
 });
 
 // ================== 역할 ID ==================
-const BOT_MANAGER_ROLE_ID = '1486229581592793209';       // 봇 모든 명령어 사용 가능
-const HR_ADMIN_ROLE_ID = '1486229581584142437';          // 인사행정단
-const MAJOR_ROLE_ID = '1486229581190004753';             // 소령
-const LTCOL_ROLE_ID = '1486229581190004754';             // 중령
+const ALL_COMMAND_MANAGER_ROLE_ID = '1489255441492869170'; // 모든 관리 명령어 사용 가능
+const HR_ADMIN_ROLE_ID = '1486229581584142437';           // /강등대상 포함 대상 역할
+const DEMOTION_EXCLUDED_ROLE_ID = '1486229581190004752';  // /강등대상 제외 역할
+const MAJOR_ROLE_ID = '1486229581190004753';              // 소령행정보고 / 소령 점수 포함
+const LTCOL_ROLE_ID = '1486229581190004754';              // 중령행정보고 / 중령 점수 포함
 
 const MANAGER_ROLE_IDS = [
-  BOT_MANAGER_ROLE_ID
+  ALL_COMMAND_MANAGER_ROLE_ID
 ];
 
-// 점수 조회에는 소령/중령 역할 보유자를 전부 포함
-const EXCLUDED_ROLE_IDS = [];
+// 점수 조회 포함 역할
+const SCORE_INCLUDED_ROLE_IDS = {
+  소령: MAJOR_ROLE_ID,
+  중령: LTCOL_ROLE_ID
+};
 
-// 강등대상에서는 인사행정단도 포함되도록 HR_ADMIN_ROLE_ID 제외 제거
-const DEMOTION_EXCLUDED_ROLE_IDS = [
-  BOT_MANAGER_ROLE_ID
+// 강등 대상 관련
+const DEMOTION_REQUIRED_ROLE_IDS = [
+  HR_ADMIN_ROLE_ID
 ];
 
 const DEMOTION_ALLOWED_ROLE_IDS = [
-  BOT_MANAGER_ROLE_ID
+  ALL_COMMAND_MANAGER_ROLE_ID
 ];
 
 const DATA_DIR = path.join(__dirname, 'data');
@@ -268,10 +272,12 @@ function getAdminPointsByPercentile(pct) {
   return 20;
 }
 
-// 점수 조회에는 소령/중령 역할 보유자를 전부 포함
+// 점수 조회 포함 기준:
+// 소령 = 1486229581190004753
+// 중령 = 1486229581190004754
 async function getEligibleMemberIdsByRank(guild, rankName) {
   const members = await guild.members.fetch();
-  const requiredRole = rankName === '소령' ? MAJOR_ROLE_ID : LTCOL_ROLE_ID;
+  const requiredRole = SCORE_INCLUDED_ROLE_IDS[rankName];
 
   const ids = [];
   for (const [, m] of members) {
@@ -285,7 +291,7 @@ async function getEligibleMemberIdsByRank(guild, rankName) {
 // ================== 점수 계산 핵심 ==================
 function buildDayScoresForMembers(rankName, dateStr, memberIds) {
   const is소령 = rankName === '소령';
-  const minRequired = is소령 ? 3 : 4;
+  const minRequired = is소령 ? 2 : 3;
   const group = is소령 ? data.소령 : data.중령;
 
   const rows = (memberIds || []).map((userId) => {
@@ -342,7 +348,7 @@ function getDayTotalsOnly(rankName, dateStr) {
   if (cached) return cached;
 
   const is소령 = rankName === '소령';
-  const minRequired = is소령 ? 3 : 4;
+  const minRequired = is소령 ? 2 : 3;
   const group = is소령 ? data.소령 : data.중령;
 
   const rows = Object.entries(group.users || {}).map(([userId, u]) => {
@@ -424,7 +430,7 @@ function createDailyEmbedPaged(rankName, dateStr, fullList, page, pageSize, titl
   return new EmbedBuilder()
     .setTitle(`${rankName} ${titlePrefix} (${dateStr}) (최대 100점)`)
     .setDescription(lines)
-    .setFooter({ text: `페이지 ${p + 1}/${totalPages} · 최소업무 미달자는 행정점수 0점, 추가점수는 그대로 반영` });
+    .setFooter({ text: `페이지 ${p + 1}/${totalPages} · 소령 최소 2건 / 중령 최소 3건 미달 시 행정점수 0점, 추가점수는 그대로 반영` });
 }
 
 function createWeeklyEmbedPaged(rankName, weekStart, weekEnd, fullList, page, pageSize, titlePrefix) {
@@ -462,7 +468,7 @@ function createDemotionEmbed(list, page, pageSize, totalPages) {
   return new EmbedBuilder()
     .setTitle('강등 대상 (주간 총합 120점 미만)')
     .setDescription(lines)
-    .setFooter({ text: `페이지 ${page + 1}/${totalPages} · 가입 7일 미만 유저는 제외됨` });
+    .setFooter({ text: `페이지 ${page + 1}/${totalPages} · 가입 7일 미만 제외 / 1486229581584142437 역할 보유자만 포함 / 1486229581190004752 역할 보유자 제외` });
 }
 
 function buildDemotionComponents(page, totalPages) {
@@ -595,7 +601,7 @@ async function registerCommands() {
 
   const 소령Command = new SlashCommandBuilder()
     .setName('소령행정보고')
-    .setDescription('소령 행정 보고서 (소령 전용 / 02시~익일 02시 기준 하루 1회)')
+    .setDescription('소령 행정 보고서 (소령 역할 전용 / 02시~익일 02시 기준 하루 1회)')
     .addIntegerOption(o => o.setName('진급처리').setDescription('진급 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('인증처리').setDescription('인증 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('행정처리').setDescription('행정 처리 : n건').setRequired(true))
@@ -610,7 +616,7 @@ async function registerCommands() {
 
   const 중령Command = new SlashCommandBuilder()
     .setName('중령행정보고')
-    .setDescription('중령 행정 보고서 (중령 전용 / 02시~익일 02시 기준 하루 1회)')
+    .setDescription('중령 행정 보고서 (중령 역할 전용 / 02시~익일 02시 기준 하루 1회)')
     .addIntegerOption(o => o.setName('진급처리').setDescription('진급 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('인증처리').setDescription('인증 처리 : n건').setRequired(true))
     .addIntegerOption(o => o.setName('행정처리').setDescription('행정 처리 : n건').setRequired(true))
@@ -641,15 +647,14 @@ async function registerCommands() {
 
     new SlashCommandBuilder().setName('소령오늘점수').setDescription('소령 오늘 점수 조회').toJSON(),
     new SlashCommandBuilder().setName('중령오늘점수').setDescription('중령 오늘 점수 조회').toJSON(),
-    new SlashCommandBuilder().setName('소령주간점수').setDescription('소령 주간 점수 조회').toJSON(),
-    new SlashCommandBuilder().setName('중령주간점수').setDescription('중령 주간 점수 조회').toJSON(),
+    new SlashCommandBuilder().setName('소령이번주점수').setDescription('소령 이번 주 점수 조회').toJSON(),
+    new SlashCommandBuilder().setName('중령이번주점수').setDescription('중령 이번 주 점수 조회').toJSON(),
     new SlashCommandBuilder().setName('소령어제점수').setDescription('소령 어제 점수 조회').toJSON(),
     new SlashCommandBuilder().setName('중령어제점수').setDescription('중령 어제 점수 조회').toJSON(),
     new SlashCommandBuilder().setName('소령지난주점수').setDescription('소령 지난주 점수 조회').toJSON(),
     new SlashCommandBuilder().setName('중령지난주점수').setDescription('중령 지난주 점수 조회').toJSON(),
 
     new SlashCommandBuilder().setName('어제점수').setDescription('소령/중령 어제 점수 요약 안내').toJSON(),
-    new SlashCommandBuilder().setName('지난주점수').setDescription('소령/중령 지난주 점수 요약 안내').toJSON(),
 
     소령오늘초기화.toJSON(),
     중령오늘초기화.toJSON(),
@@ -766,7 +771,7 @@ client.on('interactionCreate', async interaction => {
         const totalPages = Math.max(1, Math.ceil(s.list.length / pageSize));
         const p = clamp(page, 0, totalPages - 1);
 
-        const titlePrefix = s.mode === 'week' ? '주간 점수' : '지난주 점수';
+        const titlePrefix = s.mode === 'week' ? '이번주 점수' : '지난주 점수';
         const embed = createWeeklyEmbedPaged(rankName, weekStart, weekEnd, s.list, p, pageSize, titlePrefix);
         const components = buildPagerComponents(rankName, s.mode, s.key, p, totalPages);
 
@@ -811,7 +816,7 @@ client.on('interactionCreate', async interaction => {
   const isMajor = () => hasRole(MAJOR_ROLE_ID);
   const isLtCol = () => hasRole(LTCOL_ROLE_ID);
 
-  // /소령행정보고: 소령 역할만 사용 가능
+  // /소령행정보고: 1486229581190004753 역할만 사용 가능
   if (cmd === '소령행정보고') {
     if (!isMajor()) {
       return interaction.reply({
@@ -821,7 +826,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // /중령행정보고: 중령 역할만 사용 가능
+  // /중령행정보고: 1486229581190004754 역할만 사용 가능
   if (cmd === '중령행정보고') {
     if (!isLtCol()) {
       return interaction.reply({
@@ -831,7 +836,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // 그 외 명령어는 봇 관리자 역할만 사용 가능
+  // 그 외 명령어는 관리자 역할만 사용 가능
   if (cmd !== '소령행정보고' && cmd !== '중령행정보고') {
     if (!isManager()) {
       return interaction.reply({
@@ -908,7 +913,6 @@ client.on('interactionCreate', async interaction => {
       replyText += `\n⚠️ 증거 사진이 첨부되지 않았습니다.`;
     }
 
-    // ✅ 하루 1회 제출이므로 누적 += 가 아니라 해당 날짜에 최초 1회 저장
     u.daily[date] = {
       admin: adminCount,
       extra: extra
@@ -1005,7 +1009,7 @@ client.on('interactionCreate', async interaction => {
     const page = 0;
     const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
 
-    const titlePrefix = mode === 'week' ? '주간 점수' : '지난주 점수';
+    const titlePrefix = mode === 'week' ? '이번주 점수' : '지난주 점수';
     const embed = createWeeklyEmbedPaged(rankName, weekStart, weekEnd, list, page, pageSize, titlePrefix);
     const components = buildPagerComponents(rankName, mode, weekStart, page, totalPages);
 
@@ -1016,11 +1020,11 @@ client.on('interactionCreate', async interaction => {
   if (cmd === '소령오늘점수') return replyDailyPaged('소령', getReportDate(), 'today');
   if (cmd === '중령오늘점수') return replyDailyPaged('중령', getReportDate(), 'today');
 
-  if (cmd === '소령주간점수') {
+  if (cmd === '소령이번주점수') {
     const weekStart = data.소령.weekStart || getSundayWeekStart(getReportDate());
     return replyWeeklyPaged('소령', weekStart, 'week');
   }
-  if (cmd === '중령주간점수') {
+  if (cmd === '중령이번주점수') {
     const weekStart = data.중령.weekStart || getSundayWeekStart(getReportDate());
     return replyWeeklyPaged('중령', weekStart, 'week');
   }
@@ -1055,8 +1059,9 @@ client.on('interactionCreate', async interaction => {
       const rankName = getRankNameForMember(m);
       if (!rankName) continue;
 
+      if (!hasAnyRole(m, DEMOTION_REQUIRED_ROLE_IDS)) continue;
+      if (m.roles.cache.has(DEMOTION_EXCLUDED_ROLE_ID)) continue;
       if (daysSinceJoined(m) < 7) continue;
-      if (hasAnyRole(m, DEMOTION_EXCLUDED_ROLE_IDS)) continue;
 
       eligible.push({ member: m, rankName });
     }
@@ -1099,13 +1104,6 @@ client.on('interactionCreate', async interaction => {
     const dateStr = getYesterdayDate();
     const embed = new EmbedBuilder()
       .setTitle(`어제 점수 (기준일: ${dateStr})`)
-      .setDescription('※ 공용 명령은 현재 “요약 안내”만 유지 중입니다.');
-    return interaction.reply({ embeds: [embed] });
-  }
-
-  if (cmd === '지난주점수') {
-    const embed = new EmbedBuilder()
-      .setTitle('지난주 점수')
       .setDescription('※ 공용 명령은 현재 “요약 안내”만 유지 중입니다.');
     return interaction.reply({ embeds: [embed] });
   }
@@ -1234,7 +1232,7 @@ client.on('interactionCreate', async interaction => {
         `- 등록 인원: ${sLt.userCount}명\n` +
         `- 누적(원자료): 행정(건수) ${sLt.totalAdmin} / 추가(점수) ${sLt.totalExtra}\n` +
         `- 오늘(원자료): 행정(건수) ${sLt.todayAdminUnits} / 추가(점수) ${sLt.todayExtra}\n\n` +
-        `※ 최소업무 미달이어도 추가점수는 점수 합산에 반영됩니다.\n` +
+        `※ 소령 최소업무 2건 / 중령 최소업무 3건 미달이어도 추가점수는 점수 합산에 반영됩니다.\n` +
         `※ 행정보고는 02시~익일 02시 기준 하루 1회만 제출 가능합니다.`
       );
 
@@ -1254,10 +1252,13 @@ client.login(TOKEN);
 ================== 최종 반영 사항 ==================
 
 1) 역할 ID
-- 소령: 1486229581190004753
-- 중령: 1486229581190004754
-- 인사행정단: 1486229581584142437
-- 봇 전체 명령어 사용 가능 역할: 1486229581592793209
+- 소령 행정보고 사용 가능 역할: 1486229581190004753
+- 중령 행정보고 사용 가능 역할: 1486229581190004754
+- 소령 점수 조회 포함 역할: 1486229581190004753
+- 중령 점수 조회 포함 역할: 1486229581190004754
+- 강등대상 포함 역할: 1486229581584142437
+- 강등대상 제외 역할: 1486229581190004752
+- 모든 관리 명령어 사용 가능 역할: 1489255441492869170
 
 2) 행정 업무 입력 항목
 - 진급처리
@@ -1277,7 +1278,8 @@ client.login(TOKEN);
 - 추가점수 최대 30점
 
 5) 최소업무 미달 처리
-- 소령 3 미만 / 중령 4 미만이면 행정점수 0점
+- 소령 2 미만이면 행정점수 0점
+- 중령 3 미만이면 행정점수 0점
 - 추가점수는 그대로 반영
 
 6) 점수 배점
@@ -1298,36 +1300,51 @@ F 총 행정 건수
 G 보직모집
 H 훈련개최
 
-8) 점수 조회 포함 기준
-- 소령오늘점수 / 소령어제점수 / 소령지난주점수 / 소령주간점수:
-  소령 역할 보유자 전부 포함
-- 중령오늘점수 / 중령어제점수 / 중령지난주점수 / 중령주간점수:
-  중령 역할 보유자 전부 포함
+8) 점수 조회 명령어
+- /소령오늘점수
+- /소령어제점수
+- /소령이번주점수
+- /소령지난주점수
+  → 포함 역할 ID: 1486229581190004753
 
-9) 강등 대상 포함 기준
-- 인사행정단 역할 보유자도 포함
-- 단, 가입 7일 미만 유저는 계속 제외
-- BOT_MANAGER_ROLE_ID 보유자는 제외 유지
+- /중령오늘점수
+- /중령어제점수
+- /중령이번주점수
+- /중령지난주점수
+  → 포함 역할 ID: 1486229581190004754
 
-10) 증거사진
+9) 강등 대상 기준
+- HR_ADMIN_ROLE_ID(1486229581584142437) 보유자만 포함
+- 단, 1486229581190004752 역할 보유자는 제외
+- 가입 7일 미만 제외
+- rank는 소령/중령 역할 기준으로 판별
+
+10) 제거된 명령어
+- /지난주점수 제거 완료
+
+11) 변경된 명령어명
+- /소령주간점수 -> /소령이번주점수
+- /중령주간점수 -> /중령이번주점수
+
+12) 증거사진
 - 최대 10장 첨부 가능
 - 첨부파일만 전송
 - embed에 URL 재출력 안 함
 
-11) 시트 탭 이름
+13) 시트 탭 이름
 - 반드시 '소령', '중령'
 
-12) 스프레드시트 공유
+14) 스프레드시트 공유
 - 서비스 계정 이메일
   service-account-579@fulfillment-management-bot2.iam.gserviceaccount.com
   에 편집 권한으로 공유해야 정상 작동
 
-13) 명령어 권한 최종
-- /소령행정보고 → 소령 역할(ID: 1486229581190004753)만 사용 가능
-- /중령행정보고 → 중령 역할(ID: 1486229581190004754)만 사용 가능
-- 그 외 모든 명령어 → BOT_MANAGER_ROLE_ID 필요
+15) 명령어 권한 최종
+- /소령행정보고 → 1486229581190004753 역할만 사용 가능
+- /중령행정보고 → 1486229581190004754 역할만 사용 가능
+- 그 외 모든 관리 명령어 → 1489255441492869170 필요
 
-14) 1일 1회 제한
+16) 1일 1회 제한
 - /소령행정보고, /중령행정보고는 02:00 ~ 익일 02:00 기준 하루 1회만 가능
 - 해당 날짜 기록이 이미 존재하면 재사용 불가
 - /소령오늘초기화, /중령오늘초기화로 해당 날짜 기록 삭제 시 다시 보고 가능
