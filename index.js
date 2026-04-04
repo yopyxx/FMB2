@@ -454,7 +454,7 @@ function createWeeklyEmbedPaged(rankName, weekStart, weekEnd, fullList, page, pa
     .setFooter({ text: `페이지 ${p + 1}/${totalPages} · 주간=일~토(7일) 합산 / 최소업무 미달일도 추가점수는 반영` });
 }
 
-function createDemotionEmbed(list, page, pageSize, totalPages) {
+function createDemotionEmbed(list, page, pageSize, totalPages, title = '강등 대상 (주간 총합 120점 미만)', footerPrefix = '현재 주') {
   const start = page * pageSize;
   const slice = list.slice(start, start + pageSize);
 
@@ -466,21 +466,21 @@ function createDemotionEmbed(list, page, pageSize, totalPages) {
     : '대상이 없습니다.';
 
   return new EmbedBuilder()
-    .setTitle('강등 대상 (주간 총합 120점 미만)')
+    .setTitle(title)
     .setDescription(lines)
-    .setFooter({ text: `페이지 ${page + 1}/${totalPages} · 가입 7일 미만 제외 / 1486229581584142437 역할 보유자만 포함 / 1486229581190004752 역할 보유자 제외` });
+    .setFooter({ text: `페이지 ${page + 1}/${totalPages} · ${footerPrefix} 기준 · 가입 7일 미만 제외 / 1486229581584142437 역할 보유자만 포함 / 1486229581190004752 역할 보유자 제외` });
 }
 
-function buildDemotionComponents(page, totalPages) {
+function buildDemotionComponents(mode, key, page, totalPages) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`dg|${page - 1}`)
+        .setCustomId(`dg|${mode}|${key}|${page - 1}`)
         .setLabel('이전 페이지')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(page <= 0),
       new ButtonBuilder()
-        .setCustomId(`dg|${page + 1}`)
+        .setCustomId(`dg|${mode}|${key}|${page + 1}`)
         .setLabel('다음 페이지')
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(page >= totalPages - 1)
@@ -594,6 +594,49 @@ function runWeeklyAutoReset() {
   console.log(`🔄 주간 초기화 완료 (weekStart=${thisWeekStart}, lastWeekStart=${lastWeekStart})`);
 }
 
+// ================== 강등 대상 계산 ==================
+async function buildDemotionListForWeek(guild, weekStart) {
+  const members = await guild.members.fetch();
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  const eligible = [];
+  for (const [, m] of members) {
+    if (m.user?.bot) continue;
+
+    const rankName = getRankNameForMember(m);
+    if (!rankName) continue;
+
+    if (!hasAnyRole(m, DEMOTION_REQUIRED_ROLE_IDS)) continue;
+    if (m.roles.cache.has(DEMOTION_EXCLUDED_ROLE_ID)) continue;
+    if (daysSinceJoined(m) < 7) continue;
+
+    eligible.push({ member: m, rankName });
+  }
+
+  const list = [];
+
+  for (const { member, rankName } of eligible) {
+    let totalScore = 0;
+
+    for (const d of weekDates) {
+      const dayTotals = getDayTotalsOnly(rankName, d);
+      totalScore += (dayTotals.get(member.id) || 0);
+    }
+
+    if (totalScore < 120) {
+      list.push({
+        userId: member.id,
+        mention: `<@${member.id}>`,
+        rankName,
+        totalScore
+      });
+    }
+  }
+
+  list.sort((a, b) => a.totalScore - b.totalScore);
+  return list;
+}
+
 // ================== 명령어 등록 ==================
 async function registerCommands() {
   const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
@@ -661,7 +704,8 @@ async function registerCommands() {
     new SlashCommandBuilder().setName('초기화주간').setDescription('주간 전체 초기화').toJSON(),
     new SlashCommandBuilder().setName('행정통계').setDescription('전체 통계').toJSON(),
 
-    new SlashCommandBuilder().setName('강등대상').setDescription('주간 총합 120점 미만 강등 대상 조회').toJSON()
+    new SlashCommandBuilder().setName('강등대상').setDescription('이번 주 주간 총합 120점 미만 강등 대상 조회').toJSON(),
+    new SlashCommandBuilder().setName('지난주강등대상').setDescription('지난 주 주간 총합 120점 미만 강등 대상 조회').toJSON()
   ]);
 
   console.log('✅ 명령어 등록 완료');
@@ -785,12 +829,16 @@ client.on('interactionCreate', async interaction => {
       const allowed = hasAnyRole(interaction.member, DEMOTION_ALLOWED_ROLE_IDS);
       if (!allowed) return interaction.reply({ content: '❌ 지정된 관리 역할만 사용할 수 있습니다.', ephemeral: true });
 
-      const page = parseInt(customId.split('|')[1], 10) || 0;
+      const parts = customId.split('|');
+      const mode = parts[1];
+      const key = parts[2];
+      const page = parseInt(parts[3], 10) || 0;
+
       const msgId = interaction.message?.id;
       const session = msgId ? paginationSessions.get(msgId) : null;
 
-      if (!session || session.mode !== 'demotion') {
-        return interaction.reply({ content: 'ℹ️ 페이지 세션이 만료되었습니다. /강등대상 명령어를 다시 실행하세요.', ephemeral: true });
+      if (!session || session.mode !== mode || session.key !== key) {
+        return interaction.reply({ content: 'ℹ️ 페이지 세션이 만료되었습니다. 명령어를 다시 실행하세요.', ephemeral: true });
       }
 
       const pageSize = session.pageSize || 28;
@@ -798,8 +846,22 @@ client.on('interactionCreate', async interaction => {
       const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
       const p = clamp(page, 0, totalPages - 1);
 
-      const embed = createDemotionEmbed(list, p, pageSize, totalPages);
-      const components = buildDemotionComponents(p, totalPages);
+      const isLastWeek = mode === 'demotion_lastweek';
+      const weekStart = key;
+      const weekEnd = addDays(weekStart, 6);
+
+      const embed = createDemotionEmbed(
+        list,
+        p,
+        pageSize,
+        totalPages,
+        isLastWeek
+          ? `지난주 강등 대상 (${weekStart} ~ ${weekEnd}, 주간 총합 120점 미만)`
+          : `강등 대상 (${weekStart} ~ ${weekEnd}, 주간 총합 120점 미만)`,
+        isLastWeek ? '지난 주' : '현재 주'
+      );
+
+      const components = buildDemotionComponents(mode, key, p, totalPages);
 
       return interaction.update({ embeds: [embed], components });
     }
@@ -1017,6 +1079,33 @@ client.on('interactionCreate', async interaction => {
     paginationSessions.set(msg.id, { rankName, mode, key: weekStart, list, pageSize });
   }
 
+  async function replyDemotionPaged(weekStart, mode) {
+    if (!guild) return interaction.reply({ content: '❌ 서버 정보를 찾을 수 없습니다.', ephemeral: true });
+
+    const list = await buildDemotionListForWeek(guild, weekStart);
+    const pageSize = 28;
+    const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+    const page = 0;
+    const weekEnd = addDays(weekStart, 6);
+    const isLastWeek = mode === 'demotion_lastweek';
+
+    const embed = createDemotionEmbed(
+      list,
+      page,
+      pageSize,
+      totalPages,
+      isLastWeek
+        ? `지난주 강등 대상 (${weekStart} ~ ${weekEnd}, 주간 총합 120점 미만)`
+        : `강등 대상 (${weekStart} ~ ${weekEnd}, 주간 총합 120점 미만)`,
+      isLastWeek ? '지난 주' : '현재 주'
+    );
+
+    const components = buildDemotionComponents(mode, weekStart, page, totalPages);
+
+    const msg = await interaction.reply({ embeds: [embed], components, fetchReply: true });
+    paginationSessions.set(msg.id, { mode, key: weekStart, list, pageSize });
+  }
+
   if (cmd === '소령오늘점수') return replyDailyPaged('소령', getReportDate(), 'today');
   if (cmd === '중령오늘점수') return replyDailyPaged('중령', getReportDate(), 'today');
 
@@ -1046,58 +1135,18 @@ client.on('interactionCreate', async interaction => {
   if (cmd === '강등대상') {
     const allowed = hasAnyRole(interaction.member, DEMOTION_ALLOWED_ROLE_IDS);
     if (!allowed) return interaction.reply({ content: '❌ 지정된 관리 역할만 사용할 수 있습니다.', ephemeral: true });
-    if (!guild) return interaction.reply({ content: '❌ 서버 정보를 찾을 수 없습니다.', ephemeral: true });
 
-    const members = await guild.members.fetch();
     const currentWeekStart = getSundayWeekStart(getReportDate());
-    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
+    return replyDemotionPaged(currentWeekStart, 'demotion_current');
+  }
 
-    const eligible = [];
-    for (const [, m] of members) {
-      if (m.user?.bot) continue;
+  if (cmd === '지난주강등대상') {
+    const allowed = hasAnyRole(interaction.member, DEMOTION_ALLOWED_ROLE_IDS);
+    if (!allowed) return interaction.reply({ content: '❌ 지정된 관리 역할만 사용할 수 있습니다.', ephemeral: true });
 
-      const rankName = getRankNameForMember(m);
-      if (!rankName) continue;
-
-      if (!hasAnyRole(m, DEMOTION_REQUIRED_ROLE_IDS)) continue;
-      if (m.roles.cache.has(DEMOTION_EXCLUDED_ROLE_ID)) continue;
-      if (daysSinceJoined(m) < 7) continue;
-
-      eligible.push({ member: m, rankName });
-    }
-
-    const list = [];
-
-    for (const { member, rankName } of eligible) {
-      let totalScore = 0;
-
-      for (const d of weekDates) {
-        const dayTotals = getDayTotalsOnly(rankName, d);
-        totalScore += (dayTotals.get(member.id) || 0);
-      }
-
-      if (totalScore < 120) {
-        list.push({
-          userId: member.id,
-          mention: `<@${member.id}>`,
-          rankName,
-          totalScore
-        });
-      }
-    }
-
-    list.sort((a, b) => a.totalScore - b.totalScore);
-
-    const pageSize = 28;
-    const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
-    const page = 0;
-
-    const embed = createDemotionEmbed(list, page, pageSize, totalPages);
-    const components = buildDemotionComponents(page, totalPages);
-
-    const msg = await interaction.reply({ embeds: [embed], components, fetchReply: true });
-    paginationSessions.set(msg.id, { mode: 'demotion', list, pageSize });
-    return;
+    const thisWeekStart = getSundayWeekStart(getReportDate());
+    const lastWeekStart = addDays(thisWeekStart, -7);
+    return replyDemotionPaged(lastWeekStart, 'demotion_lastweek');
   }
 
   if (cmd === '어제점수') {
@@ -1318,6 +1367,8 @@ H 훈련개최
 - 단, 1486229581190004752 역할 보유자는 제외
 - 가입 7일 미만 제외
 - rank는 소령/중령 역할 기준으로 판별
+- /강등대상 = 이번 주 기준
+- /지난주강등대상 = 지난 주 기준
 
 10) 제거된 명령어
 - /지난주점수 제거 완료
